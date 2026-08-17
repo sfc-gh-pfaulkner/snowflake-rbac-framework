@@ -1,0 +1,33 @@
+name: Deploy to Base Database
+
+on:
+  workflow_call:
+    inputs:
+      dcm_target:
+        description: 'DCM manifest target name (e.g. DEV or PROD)'
+        required: true
+        type: string
+    secrets:
+      SNOWFLAKE_ACCOUNT:
+        required: true
+      SNOWFLAKE_USER:
+        required: true
+      SNOWFLAKE_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy-to-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowCLI
+        uses: Snowflake-Labs/snowflake-cli-action@v1
+
+      - name: Deploy DCM to base database
+        run: |
+          snow dcm deploy --target ${{ inputs.dcm_target }} \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}")

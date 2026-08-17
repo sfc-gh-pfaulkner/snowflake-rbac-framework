@@ -1,0 +1,6 @@
+scripts/99_teardown.sql
+scripts/00_session_policy.sql
+scripts/01_deployment_admin.sql
+scripts/03_admin_db_deploy_schema.sql
+scripts/19_admin_db_deploy_clone.sql
+scripts/30_pii_governance.sql

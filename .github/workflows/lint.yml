@@ -1,0 +1,29 @@
+name: Lint
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linters
+        run: pip install sqlfluff yamllint pyyaml
+
+      - name: SQLFluff lint
+        run: sqlfluff lint scripts/
+
+      - name: YAML lint
+        run: yamllint -c .yamllint.yml .
+
+      - name: Security checks
+        run: bash scripts/lint/security_check.sh .
+
+      - name: DCM manifest validation
+        run: bash scripts/lint/dcm_validate.sh .

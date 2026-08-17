@@ -1,0 +1,95 @@
+name: Deploy to Production
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: 'Business domain (e.g. BRF, HR, FANDI)'
+        required: true
+        type: string
+      db_name:
+        description: 'Logical database name (e.g. CORE)'
+        required: false
+        type: string
+        default: 'CORE'
+      dcm_target:
+        description: 'DCM manifest target name (e.g. PROD)'
+        required: true
+        type: string
+      role:
+        description: 'Snowflake role for production deploy'
+        required: true
+        type: string
+      warehouse:
+        description: 'Snowflake warehouse'
+        required: false
+        type: string
+        default: 'BRF_WH'
+    secrets:
+      SNOWFLAKE_ACCOUNT:
+        required: true
+      SNOWFLAKE_USER:
+        required: true
+      SNOWFLAKE_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy-to-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowCLI
+        uses: Snowflake-Labs/snowflake-cli-action@v1
+
+      - name: Plan DCM changes (production)
+        run: |
+          snow dcm plan --target ${{ inputs.dcm_target }} \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}")
+
+      - name: Deploy DCM to production
+        run: |
+          snow dcm deploy --target ${{ inputs.dcm_target }} \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}")
+
+      - name: Run DCM tests (production)
+        run: |
+          snow dcm test --target ${{ inputs.dcm_target }} \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}")
+
+      - name: Extract issue ID from merge commit
+        id: extract
+        run: |
+          MERGE_MSG=$(git log -1 --pretty=%s)
+          ISSUE_ID=$(echo "$MERGE_MSG" | grep -oE '[0-9]+' | head -1)
+          echo "issue_id=$ISSUE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup UAT and PREPROD clones
+        if: steps.extract.outputs.issue_id != ''
+        run: |
+          ISSUE_ID="${{ steps.extract.outputs.issue_id }}"
+          DOMAIN="${{ inputs.domain }}"
+          DB_NAME="${{ inputs.db_name }}"
+          ROLE="${{ inputs.role }}"
+          WH="${{ inputs.warehouse }}"
+
+          snow sql -q "USE ROLE ${ROLE}; USE WAREHOUSE ${WH}; CALL ADMIN_DB.DEPLOY.DROP_CLONE('${ISSUE_ID}', 'PROD', '${DOMAIN}', '${DB_NAME}', 'UAT');" \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}") || true
+
+          snow sql -q "USE ROLE ${ROLE}; USE WAREHOUSE ${WH}; CALL ADMIN_DB.DEPLOY.DROP_CLONE('${ISSUE_ID}', 'PROD', '${DOMAIN}', '${DB_NAME}', 'PREPROD');" \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path <(echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}") || true
