@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 3.3.1
+    hooks:
+      - id: sqlfluff-lint
+        files: \.sql$
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yml]
+
+  - repo: local
+    hooks:
+      - id: security-check
+        name: SQL security lint
+        entry: bash scripts/lint/security_check.sh .
+        language: system
+        files: \.sql$
+        pass_filenames: false
+
+      - id: dcm-validate
+        name: DCM manifest validation
+        entry: bash scripts/lint/dcm_validate.sh .
+        language: system
+        files: manifest\.yml$
+        pass_filenames: false

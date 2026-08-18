@@ -1,0 +1,86 @@
+name: Deploy to Production
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: 'Business domain (e.g. BRF, HR, GENERAL)'
+        required: true
+        type: string
+      db_name:
+        description: 'Logical database name (e.g. CORE)'
+        required: false
+        type: string
+        default: 'CORE'
+      dcm_target:
+        description: 'DCM manifest target name (e.g. PROD)'
+        required: true
+        type: string
+      role:
+        description: 'Snowflake role for production deploy'
+        required: true
+        type: string
+      warehouse:
+        description: 'Snowflake warehouse'
+        required: false
+        type: string
+        default: 'ADMIN_WH'
+    secrets:
+      SNOWFLAKE_ACCOUNT:
+        required: true
+      SNOWFLAKE_USER:
+        required: true
+      SNOWFLAKE_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy-to-prod:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowCLI
+        run: pip install snowflake-cli-labs
+
+      - name: Write private key
+        run: |
+          echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          chmod 600 /tmp/snowflake_key.p8
+
+      - name: Compute variables
+        id: vars
+        run: |
+          DOMAIN_LOWER=$(echo "${{ inputs.domain }}" | tr '[:upper:]' '[:lower:]')
+          echo "domain_lower=$DOMAIN_LOWER" >> "$GITHUB_OUTPUT"
+
+      - name: Plan DCM changes (production)
+        run: |
+          DOMAIN_LOWER="${{ steps.vars.outputs.domain_lower }}"
+          snow dcm plan \
+            --from "domains/${DOMAIN_LOWER}/dcm" \
+            --target "${{ inputs.dcm_target }}" \
+            --temporary-connection \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --role "${{ inputs.role }}" \
+            --warehouse "${{ inputs.warehouse }}"
+
+      - name: Deploy DCM to production
+        run: |
+          DOMAIN_LOWER="${{ steps.vars.outputs.domain_lower }}"
+          snow dcm deploy \
+            --from "domains/${DOMAIN_LOWER}/dcm" \
+            --target "${{ inputs.dcm_target }}" \
+            --temporary-connection \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --role "${{ inputs.role }}" \
+            --warehouse "${{ inputs.warehouse }}"
+
+      - name: Clean up key
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8

@@ -1,0 +1,127 @@
+name: Deploy to Clone
+
+on:
+  workflow_call:
+    inputs:
+      clone_type:
+        description: 'Clone type: TEST, UAT, or PREPROD'
+        required: true
+        type: string
+      environment:
+        description: 'Source environment: DEV or PROD'
+        required: true
+        type: string
+      domain:
+        description: 'Business domain (e.g. BRF, HR, GENERAL)'
+        required: true
+        type: string
+      db_name:
+        description: 'Logical database name (e.g. CORE)'
+        required: false
+        type: string
+        default: 'CORE'
+      dcm_target:
+        description: 'DCM manifest target name (e.g. DEV or PROD)'
+        required: true
+        type: string
+      role:
+        description: 'Snowflake role for clone operations'
+        required: true
+        type: string
+      warehouse:
+        description: 'Snowflake warehouse'
+        required: false
+        type: string
+        default: 'ADMIN_WH'
+    secrets:
+      SNOWFLAKE_ACCOUNT:
+        required: true
+      SNOWFLAKE_USER:
+        required: true
+      SNOWFLAKE_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy-to-clone:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowCLI
+        run: pip install snowflake-cli-labs
+
+      - name: Write private key
+        run: |
+          echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+          chmod 600 /tmp/snowflake_key.p8
+
+      - name: Extract issue ID from branch
+        id: extract
+        run: |
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          # Try to extract issue number from branch name (feature/2-something)
+          ISSUE_ID=$(echo "$BRANCH" | sed -E 's|[^/]+/([0-9]+)-.*|\1|')
+          # If that didn't work (promotion branches like test/main), try PR title
+          if [[ "$ISSUE_ID" == "$BRANCH" || -z "$ISSUE_ID" ]]; then
+            PR_TITLE="${{ github.event.pull_request.title || '' }}"
+            ISSUE_ID=$(echo "$PR_TITLE" | grep -oE '[0-9]+' | head -1)
+          fi
+          # Final fallback: use "0" (should not happen in normal flow)
+          if [[ -z "$ISSUE_ID" ]]; then
+            ISSUE_ID="0"
+          fi
+          CLONE_DB="${{ inputs.clone_type }}_${ISSUE_ID}_${{ inputs.domain }}_${{ inputs.db_name }}_DB"
+          DOMAIN_LOWER=$(echo "${{ inputs.domain }}" | tr '[:upper:]' '[:lower:]')
+          echo "issue_id=$ISSUE_ID" >> "$GITHUB_OUTPUT"
+          echo "clone_db=$CLONE_DB" >> "$GITHUB_OUTPUT"
+          echo "domain_lower=$DOMAIN_LOWER" >> "$GITHUB_OUTPUT"
+
+      - name: Create clone
+        run: |
+          snow sql -q "CALL ADMIN_DB.DEPLOY.DEPLOY_CLONE('${{ steps.extract.outputs.issue_id }}', '${{ inputs.environment }}', '${{ inputs.domain }}', '${{ inputs.db_name }}', '${{ inputs.clone_type }}');" \
+            --temporary-connection \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --role "${{ inputs.role }}" \
+            --warehouse "${{ inputs.warehouse }}"
+
+      - name: Deploy DCM to clone
+        run: |
+          CLONE_DB="${{ steps.extract.outputs.clone_db }}"
+          DOMAIN_LOWER="${{ steps.extract.outputs.domain_lower }}"
+          DCM_PROJECT="${CLONE_DB}.DCM.${{ inputs.domain }}_${{ inputs.db_name }}_PROJECT"
+
+          snow dcm deploy "${DCM_PROJECT}" \
+            --from "domains/${DOMAIN_LOWER}/dcm" \
+            --target "${{ inputs.dcm_target }}" \
+            --variable "db='${CLONE_DB}'" \
+            --temporary-connection \
+            --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+            --user "${{ secrets.SNOWFLAKE_USER }}" \
+            --authenticator SNOWFLAKE_JWT \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --role "${{ inputs.role }}" \
+            --warehouse "${{ inputs.warehouse }}"
+
+      - name: Seed test data
+        run: |
+          CLONE_DB="${{ steps.extract.outputs.clone_db }}"
+          DOMAIN_LOWER="${{ steps.extract.outputs.domain_lower }}"
+          SEED_FILE="test/seed_data.sql"
+          if [ -f "$SEED_FILE" ]; then
+            snow sql -f "$SEED_FILE" \
+              --temporary-connection \
+              --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+              --user "${{ secrets.SNOWFLAKE_USER }}" \
+              --authenticator SNOWFLAKE_JWT \
+              --private-key-path /tmp/snowflake_key.p8 \
+              --role "${{ inputs.role }}" \
+              --warehouse "${{ inputs.warehouse }}" \
+              -D "db='${CLONE_DB}'"
+          fi
+
+      - name: Clean up key
+        if: always()
+        run: rm -f /tmp/snowflake_key.p8
