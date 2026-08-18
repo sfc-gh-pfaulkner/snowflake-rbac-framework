@@ -119,7 +119,8 @@ jobs:
               --private-key-path /tmp/snowflake_key.p8 \
               --role "${{ inputs.role }}" \
               --warehouse "${{ inputs.warehouse }}" \
-              -D "db='${CLONE_DB}'"
+              -D "db=${CLONE_DB}" \
+              --enable-templating JINJA
           fi
 
       - name: Clean up key
