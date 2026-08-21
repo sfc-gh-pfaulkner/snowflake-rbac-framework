@@ -127,6 +127,28 @@ jobs:
               --enable-templating JINJA
           fi
 
+      - name: Run post-deploy scripts
+        run: |
+          CLONE_DB="${{ steps.extract.outputs.clone_db }}"
+          DOMAIN_LOWER="${{ steps.extract.outputs.domain_lower }}"
+          POST_DIR="domains/${DOMAIN_LOWER}/post_deploy"
+          if [ -d "$POST_DIR" ]; then
+            for SCRIPT in "$POST_DIR"/*.sql; do
+              [ -f "$SCRIPT" ] || continue
+              echo "Running post-deploy: $SCRIPT"
+              snow sql -f "$SCRIPT" \
+                --temporary-connection \
+                --account "${{ secrets.SNOWFLAKE_ACCOUNT }}" \
+                --user "${{ secrets.SNOWFLAKE_USER }}" \
+                --authenticator SNOWFLAKE_JWT \
+                --private-key-path /tmp/snowflake_key.p8 \
+                --role "${{ inputs.role }}" \
+                --warehouse "${{ inputs.warehouse }}" \
+                -D "db=${CLONE_DB}" \
+                --enable-templating JINJA
+            done
+          fi
+
       - name: Clean up key
         if: always()
         run: rm -f /tmp/snowflake_key.p8
