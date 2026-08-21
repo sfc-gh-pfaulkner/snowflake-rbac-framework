@@ -124,11 +124,16 @@ end;
   echo ""
 done
 
-echo "=== Partial reset complete. Now re-provision: ==="
+echo "=== Re-provisioning domains, databases, warehouses, roles... ==="
 echo ""
-echo "  cd ${CODE_DIR}"
-echo "  snow sql -f setup/provision_databases.sql -c DEVACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH"
-echo "  snow sql -f setup/provision_databases.sql -c PRODACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH"
-echo "  snow dcm deploy --from functional_roles --target DEV -c DEVACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH"
-echo "  snow dcm deploy --from functional_roles --target PROD -c PRODACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH"
+
+cd "$CODE_DIR"
+
+snow sql -f setup/provision_databases.sql -c DEVACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH
+snow sql -f setup/provision_databases.sql -c PRODACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH
+snow dcm deploy --from functional_roles --target DEV -c DEVACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH
+snow dcm deploy --from functional_roles --target PROD -c PRODACC --role DEPLOYMENT_ADMIN --warehouse ADMIN_WH
+
+echo ""
+echo "=== Partial reset complete. Ready for demo. ==="
 echo ""
