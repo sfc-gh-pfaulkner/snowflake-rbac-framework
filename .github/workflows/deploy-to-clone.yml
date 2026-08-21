@@ -109,7 +109,11 @@ jobs:
         run: |
           CLONE_DB="${{ steps.extract.outputs.clone_db }}"
           DOMAIN_LOWER="${{ steps.extract.outputs.domain_lower }}"
-          SEED_FILE="test/seed_data.sql"
+          # Look for domain-specific seed file first, fall back to generic
+          SEED_FILE="test/seed_${DOMAIN_LOWER}.sql"
+          if [ ! -f "$SEED_FILE" ]; then
+            SEED_FILE="test/seed_data.sql"
+          fi
           if [ -f "$SEED_FILE" ]; then
             snow sql -f "$SEED_FILE" \
               --temporary-connection \
